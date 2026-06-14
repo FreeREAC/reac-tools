@@ -1,0 +1,15 @@
+name: sanitize-guard
+on: [push, pull_request]
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No site / venue / client / rig-IP leaks
+        run: |
+          if grep -rInE 'tecman|superpantalles|futini|metropol|\bnau\b|192\.168\.3\.' . \
+               --exclude-dir=.git --exclude=sanitize-guard.yml; then
+            echo "::error::forbidden site/venue/client token or rig IP found"
+            exit 1
+          fi
+          echo "clean — no forbidden tokens"

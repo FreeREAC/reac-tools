@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+capture-*/
+*.pcap
+!tests/fixtures/*.pcap
+.venv/
+site/

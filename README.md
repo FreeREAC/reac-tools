@@ -24,8 +24,20 @@ toolkit does the proper **dual-point** analysis.
 
 ## REAC framing facts (verified on the rig 2026-05-30)
 
-- EtherType `0x8819`. Playback (console→box) is **broadcast**, ~1492–1496 B,
-  ~3000 fps; return (box→console) is smaller unicast.
+- EtherType `0x8819`. Playback (console→box) is **broadcast**, ~1492–1496 B;
+  return (box→console) is smaller unicast.
+- The frame rate **is** the sample rate: `pps = rate / 12`, so 3675 pps at
+  44.1 kHz, 4000 at 48 kHz, 8000 at 96 kHz. `reac.characterize` snaps a measured
+  pps to the nearest of those (`reac/characterize.py:37`) — that table is the one
+  to trust, not this list.
+
+  The 2026-05-30 rig session measured **~3000 fps**, which is not any REAC rate.
+  That reading was taken while both boxes were losing clock lock, i.e. it is a
+  symptom, not a framing fact — the rig was running below nominal. It is recorded
+  here because it is what the capture showed, but do **not** carry it into
+  `--fps`: pass the nominal pps for the console's actual rate, or the jitter
+  ratio and the loss-rate figures come out scaled by ~25 %. (`reac.cli` still
+  defaults `--fps` to 3000, from the same session — `reac/cli.py:24`.)
 - The **16-bit sequence counter** is the **first 2 bytes of the payload,
   little-endian**, increments +1/frame, wraps at `0xffff`. (`0xfd7e→7f→80→81`.)
 - 24-bit PCM payload: digital silence ≈ >90 % zero bytes / few distinct values;
@@ -42,12 +54,29 @@ toolkit does the proper **dual-point** analysis.
 |---|---|
 | `reac.model` | `Frame` dataclass + 16-bit seq modulus |
 | `reac.parser` | parse `tcpdump -xx [-e]` text → `Frame` list (full-eth or payload-only) |
+| `reac.pcap` | classic libpcap `.pcap` reader/writer (no pcapng), link-type 1 |
 | `reac.analyzer` | per-stream loss / reorder / duplicate, cross-mix, jitter |
+| `reac.characterize` | pcap → rate fingerprint, frame-size histogram, seq health, per-channel peak / active-channel count |
 | `reac.diff` | **dual-point** loss diff: sender-side vs receiver-side captures |
 | `reac.simulator` | synthetic streams with injectable faults (drives the test suite) |
 | `reac.cli` | analyze one capture file |
 
+`reac.cli` and `reac.diff` read **tcpdump text**; `reac.characterize` reads a
+**`.pcap`** directly. Three modules are runnable as `python3 -m`: `reac.cli`,
+`reac.diff`, `reac.characterize`.
+
+There is also a Wireshark dissector for interactive work — `wireshark/reac.lua`,
+see [`wireshark/README.md`](wireshark/README.md).
+
 ## Usage
+
+Two capture scripts, both run **on** an OpenWrt router:
+
+- `capture-dualpoint.sh [SECONDS] [IFACE]` — tcpdump *text* at both ends of the
+  link at once, for the `reac.diff` loss comparison.
+- `capture-campaign.sh <iface> <seconds> <out.pcap> [label]` — full frames to a
+  classic `.pcap`, for `reac.characterize`. Used for the rate campaign (set the
+  console rate before each run; the header of the script carries the sequence).
 
 ```sh
 # On-site: capture the same stream at both ends simultaneously
@@ -59,6 +88,9 @@ python3 -m reac.cli capture-*/box-r2-lan1.txt --fps 3000
 
 # THE decisive test: what got lost crossing the link?
 python3 -m reac.diff capture-*/console-r1-lan1.txt capture-*/box-r2-lan1.txt
+
+# Rate + channel fingerprint of a .pcap (this one takes pcap, not text)
+python3 -m reac.characterize /tmp/96k.pcap
 
 # Cross-mix check on box1's port (should only carry VLAN 11 from console A)
 python3 -m reac.cli capture-*/box-r2-lan1.txt \

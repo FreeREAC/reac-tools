@@ -13,8 +13,9 @@
 #
 # The session (per the capture campaign):
 #   capture-campaign.sh lan1 20 /tmp/48k.pcap  48k    # baseline: expect ~4000 pps
-#   capture-campaign.sh lan1 20 /tmp/96k.pcap  96k    # DECISIVE: ~8000 pps => double-rate,
-#                                                     #           ~4000 pps + 20 active ch => halving
+#   capture-campaign.sh lan1 20 /tmp/96k.pcap  96k    # expect ~8000 pps, still 40 ch:
+#                                                     #   96 kHz doubles the packet rate and
+#                                                     #   does NOT halve the channels (settled)
 #   capture-campaign.sh lan1 20 /tmp/44k1.pcap 44k1   # 44.1: frames @ ~3675 pps => our missing mode;
 #                                                     #       no frames / box won't lock => mixer clock
 # Then pull each .pcap to the analysis host and run:

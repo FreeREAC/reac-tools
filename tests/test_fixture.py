@@ -15,6 +15,7 @@ import unittest
 
 from reac.pcap import read_pcap
 from reac.analyzer import analyze_stream, jitter_stats
+from reac.model import pps_for_rate
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "real_reac_stream.pcap")
 
@@ -38,10 +39,12 @@ class TestRealFixture(unittest.TestCase):
         self.assertEqual((r.lost, r.reordered, r.duplicated), (0, 0, 0))
 
     def test_jitter_matches_real_spacing(self):
-        # real spacing ~242-264us; at 3000fps nominal (333us) gap ratio < 1
+        # real spacing ~242-264us, i.e. the stream is 48 kHz: nominal is
+        # 4000 pps (250us), so the worst gap sits just above 1x
         frames = read_pcap(FIXTURE)
-        j = jitter_stats(frames, nominal_dt=1 / 3000)
+        j = jitter_stats(frames, nominal_dt=1 / pps_for_rate(48000))
         self.assertLess(j.max_gap_ratio, 1.5)
+        self.assertGreater(j.max_gap_ratio, 0.9)
 
 
 if __name__ == "__main__":

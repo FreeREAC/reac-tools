@@ -9,8 +9,8 @@ Given a capture, report:
   - frame size (payload length) distribution;
   - sequence health (loss / reorder / dup);
   - per-channel peak level -> active-channel count + saturation flag
-    (disambiguates 96k double-pps [40 active] vs channel-halving [20 active],
-    and surfaces a gain/justification bug = many channels pinned near full-scale);
+    (how many slots actually carry signal, and it surfaces a gain/justification
+    bug = many channels pinned near full-scale);
   - the frame-type histogram (the type[2] word: 0000 audio/filler, etc.).
 
   python3 -m reac.characterize CAPTURE.pcap [...]
@@ -24,7 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from .analyzer import analyze_stream
-from .model import Frame
+from .model import Frame, RATE_PPS, rate_from_pps
 from .pcap import read_pcap_raw
 
 _AUDIO_OFF = 36                       # counter(2) + type(2) + data(32)
@@ -34,7 +34,7 @@ _RES = 3
 _STRIDE = _N_CH * _RES                # 120 B between successive time-samples
 _AUDIO_LEN = _N_SAMP * _N_CH * _RES   # 1440
 _FULLSCALE = 0x7FFFFF
-_RATES = {44100: 3675.0, 48000: 4000.0, 96000: 8000.0}  # rate -> nominal pps (12 samp/pkt)
+_RATES = RATE_PPS  # rate -> nominal pps (= rate / 12), defined in reac.model
 
 
 @dataclass
@@ -78,7 +78,7 @@ def characterize(path):
     ts = [t for (t, *_rest) in rows]
     span = ts[-1] - ts[0]
     r.pps = (len(rows) - 1) / span if span > 0 else 0.0
-    r.inferred_rate = min(_RATES, key=lambda rate: abs(r.pps - _RATES[rate])) if r.pps else 0
+    r.inferred_rate = rate_from_pps(r.pps) or 0  # 0 = matches no REAC rate
 
     frames = [Frame(ts=t, src=s, vlan=v, seq=q, payload_len=len(p))
               for (t, s, v, q, p) in rows]
@@ -97,7 +97,7 @@ def characterize(path):
     r.saturated_channels = sum(1 for pk in peak if pk >= _FULLSCALE - 0xFF)
     r.type_hist = dict(Counter(bytes(p[2:4]).hex() for (_t, _s, _v, _q, p) in rows))
 
-    rate_lbl = "%g kHz" % (r.inferred_rate / 1000.0) if r.inferred_rate else "?"
+    rate_lbl = "%g kHz" % (r.inferred_rate / 1000.0) if r.inferred_rate else "no REAC rate"
     r.summary = ("%s (%.0f pps); %d frames; %s B; loss %d / reord %d / dup %d; "
                  "%d slots, %d active, %d saturated; types %s") % (
         rate_lbl, r.pps, r.n_frames,
@@ -115,11 +115,16 @@ def main(argv=None):
     for path in argv:
         r = characterize(path)
         print("%s: %s" % (path, r.summary))
-    print("--- interpret (rate is set BY pps; channels disambiguate the 96k model) ---")
-    print("  pps ~4000 + ~40 active  -> 48 kHz, 40 ch")
-    print("  pps ~8000 + ~40 active  -> 96 kHz double-pps   => REAC_MODE_96K = {96000,40,12}")
-    print("  pps ~4000 + ~20 active  -> 96 kHz channel-halving => {96000,20,24}  (or 48k 20-ch)")
-    print("  pps ~3675               -> 44.1 kHz             => add REAC_MODE_44K1 = {44100,40,12}")
+    print("--- interpret (the rate is set BY pps alone: pps = rate / 12) ---")
+    print("  pps ~3675  -> 44.1 kHz, 40 ch  => REAC_MODE_44K1 = {44100,40,12}")
+    print("  pps ~4000  -> 48 kHz,   40 ch  => REAC_MODE_48K  = {48000,40,12}")
+    print("  pps ~8000  -> 96 kHz,   40 ch  => REAC_MODE_96K  = {96000,40,12}")
+    print("  the channel count is 40 at every rate: 96 kHz doubles the packet rate,")
+    print("    it does NOT halve the channels (settled in libreac; the old")
+    print("    {96000,20,24} channel-halving hypothesis is disproved). So a capture")
+    print("    with ~20 active channels is a 20-channel signal count, not a rate clue.")
+    print("  pps near none of the three -> the stream is off nominal: a box losing")
+    print("    sample-clock lock streams slow. That is the fault, not a fourth rate.")
     print("  many channels saturated (peak ~0x7FFFFF) -> gain/24-bit-justification bug, not transport")
     return 0
 

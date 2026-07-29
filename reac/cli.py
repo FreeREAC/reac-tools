@@ -17,6 +17,14 @@ the nearest REAC rate (pps = rate / 12). A stream that matches none of them is
 reported as unresolved rather than snapped: pass --rate (or --fps) to say what
 the console was actually running.
 
+Mirror twins are dropped before any of that. A capture taken off a port mirror
+that spans both RX and TX sees each frame twice, so half the inter-arrivals are
+near-zero and the median lands between the two modes -- on a real 48 kHz
+S-1608 cold-connect the master reads 57.0 us (210 kHz) before the dedup and
+250.1 us (48.0 kHz) after. Below 10 % tolerance that only ever produced RATE
+UNRESOLVED, so no rate was ever invented; but no mirrored capture could be
+measured at all either.
+
 Exit status: 0 analyzed, 1 nothing to analyze, 3 at least one stream's rate
 could not be resolved (its jitter ratio was withheld rather than guessed).
 """
@@ -26,7 +34,8 @@ import statistics
 import sys
 
 from .parser import parse_tcpdump_text
-from .analyzer import analyze_stream, jitter_stats, detect_crossmix
+from .analyzer import (analyze_stream, dedupe_mirror_twins, detect_crossmix,
+                       jitter_stats)
 from .model import (RATE_PPS, RATE_TOLERANCE, REAC_RATES, pps_for_rate,
                     rate_from_pps)
 
@@ -103,9 +112,18 @@ def main(argv=None):
 
     unresolved = 0
     print(f"{len(frames)} frames, {len(groups)} stream(s)\n")
-    for (src, vlan), fs in sorted(groups.items()):
+    for (src, vlan), raw_fs in sorted(groups.items()):
+        # Before anything is measured: a capture taken off a both-directions
+        # port mirror carries every frame twice, and half its inter-arrivals
+        # are then near-zero. Nothing below -- rate, jitter, loss -- means what
+        # it says until the twins are gone.
+        fs = dedupe_mirror_twins(raw_fs)
+        twins = len(raw_fs) - len(fs)
         r = analyze_stream(fs)
         print(f"stream src={src} vlan={vlan}  n={len(fs)}")
+        if twins:
+            print(f"  mirror twins dropped: {twins} of {len(raw_fs)} "
+                  f"-- capture is off a both-directions port mirror")
         print(f"  loss={r.lost}  reorder={r.reordered}  dup={r.duplicated}")
 
         nominal_pps, pps, rate = resolve_nominal_pps(fs, forced_pps)

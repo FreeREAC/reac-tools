@@ -4,9 +4,53 @@
 """Analyze a REAC frame stream for transport faults."""
 from dataclasses import dataclass
 
-from .model import SEQ_MODULUS
+from .model import SEQ_MODULUS, clean_payload_len
 
 _HALF = SEQ_MODULUS // 2
+
+
+def _frame_identity(f):
+    return (f.src, f.payload)
+
+
+def dedupe_mirror_twins(frames, key=_frame_identity):
+    """Drop each frame that repeats the one before it from the same source.
+
+    A capture rig that mirrors BOTH RX and TX of one port sees a transiting
+    frame twice: same source MAC, same counter, same payload, one copy carrying
+    2 bytes of the frame's own Ethernet FCS after the end marker and the other
+    not. Comparing raw payloads misses that pair -- they differ in length -- so
+    the comparison runs over clean_payload_len() bytes, which also subsumes the
+    equal-length case (a box re-sending a frame verbatim).
+
+    Every timing figure has to be taken after this. Half a mirrored stream's
+    inter-arrivals are near-zero twin gaps, which drags the median to roughly
+    half nominal and, since the frame rate IS the sample rate here, reports a
+    rate that was never on the wire.
+
+    It cannot drop a distinct frame: the 16-bit counter is inside the compared
+    bytes, so consecutive frames are byte-identical only when one is a copy of
+    the other. Measured over the private capture corpus: 0 adjacent same-counter
+    pairs that differ in any byte, and 0 byte-identical pairs whose counters
+    differ.
+
+    key(frame) -> (source, payload-or-None). A frame whose payload is unknown is
+    always kept -- there is nothing to compare it on.
+    """
+    kept = []
+    prev = {}
+    for f in frames:
+        src, payload = key(f)
+        if payload is None:
+            prev.pop(src, None)
+            kept.append(f)
+            continue
+        body = payload[:clean_payload_len(len(payload))]
+        if prev.get(src) == body:
+            continue
+        prev[src] = body
+        kept.append(f)
+    return kept
 
 
 def _signed_delta(cur, prev):

@@ -26,6 +26,14 @@ toolkit does the proper **dual-point** analysis.
 
 - EtherType `0x8819`. Playback (console→box) is **broadcast**, ~1492–1496 B;
   return (box→console) is smaller unicast.
+- A clean frame is `52 + width × 36` bytes. Two extra bytes after the `C2 EA`
+  end marker (1494, 1206, 630, …) are **not** a REAC field: they are the low 16
+  bits of the frame's own Ethernet FCS, left behind by a capture rig mirroring
+  both RX and TX of a port. Such a capture carries **every frame twice**, one
+  copy with the residue and one without, so half its inter-arrivals are
+  near-zero and the median reads a rate that was never on the wire. Every tool
+  here drops the twin before it measures anything (`clean_payload_len`,
+  `dedupe_mirror_twins`).
 - The frame rate **is** the sample rate: a frame carries 12 time-samples per
   channel slot at every rate, so `pps = rate / 12` — 3675 pps at 44.1 kHz, 4000
   at 48 kHz, 8000 at 96 kHz. The table is derived, not typed, in `reac.model`
@@ -60,7 +68,7 @@ toolkit does the proper **dual-point** analysis.
 | `reac.model` | `Frame` dataclass, 16-bit seq modulus, the rate table (`pps = rate / 12`) |
 | `reac.parser` | parse `tcpdump -xx [-e]` text → `Frame` list (full-eth or payload-only) |
 | `reac.pcap` | classic libpcap `.pcap` reader/writer (no pcapng), link-type 1 |
-| `reac.analyzer` | per-stream loss / reorder / duplicate, cross-mix, jitter |
+| `reac.analyzer` | per-stream loss / reorder / duplicate, cross-mix, jitter, mirror-twin dedup |
 | `reac.characterize` | pcap → rate fingerprint, frame-size histogram, seq health, per-channel peak / active-channel count |
 | `reac.diff` | **dual-point** loss diff: sender-side vs receiver-side captures |
 | `reac.simulator` | synthetic streams with injectable faults (drives the test suite) |

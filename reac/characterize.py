@@ -13,6 +13,10 @@ Given a capture, report:
     bug = many channels pinned near full-scale);
   - the frame-type histogram (the type[2] word: 0000 audio/filler, etc.).
 
+Mirror twins are dropped first. A capture taken off a port mirror that spans
+both RX and TX carries every frame twice; counted in, they double the pps and a
+48 kHz console fingerprints as 96 kHz. The count is reported, not swallowed.
+
   python3 -m reac.characterize CAPTURE.pcap [...]
 
 Frame layout (reacdriver REACPacketHeader + obs-h8819, verified at 48k):
@@ -23,7 +27,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 
-from .analyzer import analyze_stream
+from .analyzer import analyze_stream, dedupe_mirror_twins
 from .model import Frame, RATE_PPS, rate_from_pps
 from .pcap import read_pcap_raw
 
@@ -51,6 +55,7 @@ class Report:
     active_channels: int = 0
     saturated_channels: int = 0
     type_hist: dict = field(default_factory=dict)
+    mirror_twins: int = 0     # duplicate copies dropped before anything was measured
     summary: str = ""
 
 
@@ -68,8 +73,12 @@ def _sample(audio, ch, s):
 
 
 def characterize(path):
-    rows = read_pcap_raw(path)
-    r = Report(n_frames=len(rows))
+    raw_rows = read_pcap_raw(path)
+    # A capture off a both-directions port mirror carries every frame twice.
+    # Left in, the twins double the pps this reports -- 4000 reads as 8000, so
+    # a 48 kHz console fingerprints as 96 kHz -- and count as sequence dups.
+    rows = dedupe_mirror_twins(raw_rows, key=lambda row: (row[1], row[4]))
+    r = Report(n_frames=len(rows), mirror_twins=len(raw_rows) - len(rows))
     if not rows:
         r.summary = "no REAC (0x8819) frames in %s" % path
         return r
@@ -98,9 +107,10 @@ def characterize(path):
     r.type_hist = dict(Counter(bytes(p[2:4]).hex() for (_t, _s, _v, _q, p) in rows))
 
     rate_lbl = "%g kHz" % (r.inferred_rate / 1000.0) if r.inferred_rate else "no REAC rate"
-    r.summary = ("%s (%.0f pps); %d frames; %s B; loss %d / reord %d / dup %d; "
+    twin_lbl = (" (+%d mirror twins dropped)" % r.mirror_twins) if r.mirror_twins else ""
+    r.summary = ("%s (%.0f pps); %d frames%s; %s B; loss %d / reord %d / dup %d; "
                  "%d slots, %d active, %d saturated; types %s") % (
-        rate_lbl, r.pps, r.n_frames,
+        rate_lbl, r.pps, r.n_frames, twin_lbl,
         "/".join(str(x) for x in sorted(set(r.payload_lens))),
         r.loss, r.reordered, r.duplicated,
         r.n_channels, r.active_channels, r.saturated_channels, r.type_hist)

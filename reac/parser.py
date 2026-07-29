@@ -58,6 +58,7 @@ def parse_tcpdump_text(text):
             vlan=int(hdr["vlan"]) if hdr["vlan"] else None,
             seq=seq,
             payload_len=int(hdr["len"]),
+            payload=payload or None,
         ))
 
     for line in text.splitlines():

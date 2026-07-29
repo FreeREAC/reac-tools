@@ -77,6 +77,7 @@ def read_pcap(path):
                 vlan=vlan,
                 seq=seq,
                 payload_len=len(payload),
+                payload=payload,
             ))
     return frames
 

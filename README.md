@@ -14,13 +14,13 @@ reac-tools answers **"did the network deliver the frames?"** — loss, reorder,
 duplication, A/B cross-mix, jitter. It does *not* analyse the audio inside the
 frames. Pitch and clock-wobble meters, spectrum classification, per-channel
 decode health, glitch and PLC detection, and the rig measurement scripts live in
-**[`FreeREAC/reac-labtools`](https://github.com/FreeREAC/reac-labtools)**.
+**[`FreeREAC/reac-analysis`](https://github.com/FreeREAC/reac-analysis)**.
 
 They are separate because the dependency-free property above is load-bearing:
 those tools need numpy and scipy for FFT, filtering and heterodyne detection,
 and folding them in here would end the ability to scp this package onto a
 busybox router mid-session. The split is that constraint, not a preference —
-`reac-tools` is an importable, versioned, stdlib-only package; `reac-labtools`
+`reac-tools` is an importable, versioned, stdlib-only package; `reac-analysis`
 is a set of flat, experiment-shaped instruments that each take a capture and
 print a measurement. Neither repository is the whole picture.
 
@@ -152,7 +152,7 @@ exactly it — so the analyzer is trustworthy before it ever sees real captures.
 
 ## Related
 
-- [`FreeREAC/reac-labtools`](https://github.com/FreeREAC/reac-labtools) — the
+- [`FreeREAC/reac-analysis`](https://github.com/FreeREAC/reac-analysis) — the
   numpy/scipy half of this toolkit: pitch and clock-wobble meters, spectrum
   classification, per-channel decode health, glitch and PLC detection, plus the
   rig measurement scripts.

@@ -8,6 +8,22 @@ gretap tunnels.
 Pure Python **standard library only** — no dependencies, so it runs on the
 laptop *or* directly on an OpenWrt router (busybox Python or scp'd).
 
+## This is half the toolkit
+
+reac-tools answers **"did the network deliver the frames?"** — loss, reorder,
+duplication, A/B cross-mix, jitter. It does *not* analyse the audio inside the
+frames. Pitch and clock-wobble meters, spectrum classification, per-channel
+decode health, glitch and PLC detection, and the rig measurement scripts live in
+**[`FreeREAC/reac-labtools`](https://github.com/FreeREAC/reac-labtools)**.
+
+They are separate because the dependency-free property above is load-bearing:
+those tools need numpy and scipy for FFT, filtering and heterodyne detection,
+and folding them in here would end the ability to scp this package onto a
+busybox router mid-session. The split is that constraint, not a preference —
+`reac-tools` is an importable, versioned, stdlib-only package; `reac-labtools`
+is a set of flat, experiment-shaped instruments that each take a capture and
+print a measurement. Neither repository is the whole picture.
+
 ## What problem this solves
 
 Symptom: console (M-300) recognises both stageboxes, output is patched, but the
@@ -136,6 +152,10 @@ exactly it — so the analyzer is trustworthy before it ever sees real captures.
 
 ## Related
 
+- [`FreeREAC/reac-labtools`](https://github.com/FreeREAC/reac-labtools) — the
+  numpy/scipy half of this toolkit: pitch and clock-wobble meters, spectrum
+  classification, per-channel decode health, glitch and PLC detection, plus the
+  rig measurement scripts.
 - [norihiro/obs-h8819-source](https://github.com/norihiro/obs-h8819-source) —
   OBS REAC plugin; reference for 0x8819 framing (`src/source.c`,
   `src/capdev-proc.c`).

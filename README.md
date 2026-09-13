@@ -1,81 +1,30 @@
 # reac-tools
 
 Analysis tooling for **Roland REAC** (audio-over-Ethernet, EtherType `0x8819`)
-traffic, built to diagnose the REAC-over-Wi-Fi rig at the venue — two GL-MT6000
-(Flint 2) routers carrying REAC across a 30 m 5 GHz WDS link via OpenWrt 25.12
-gretap tunnels.
+traffic: does the network deliver the frames, cleanly and in order? Loss,
+reorder, duplication, A/B cross-mix and jitter, from `tcpdump` text or a
+`.pcap` capture.
 
-Pure Python **standard library only** — no dependencies, so it runs on the
-laptop *or* directly on an OpenWrt router (busybox Python or scp'd).
+Pure Python **standard library only** — no dependencies, so it runs on a
+laptop or directly on an OpenWrt router (busybox Python, or scp'd over).
 
 ## This is half the toolkit
 
-reac-tools answers **"did the network deliver the frames?"** — loss, reorder,
-duplication, A/B cross-mix, jitter. It does *not* analyse the audio inside the
-frames. Pitch and clock-wobble meters, spectrum classification, per-channel
-decode health, glitch and PLC detection, and the rig measurement scripts live in
-**[`FreeREAC/reac-analysis`](https://github.com/FreeREAC/reac-analysis)**.
+reac-tools answers "did the network deliver the frames?". It does not analyse
+the audio inside them — pitch and clock-wobble meters, spectrum
+classification, per-channel decode health and glitch/PLC detection live in
+[`FreeREAC/reac-analysis`](https://github.com/FreeREAC/reac-analysis), which
+needs numpy and scipy. Keeping those out is what lets this package be scp'd
+onto a busybox router mid-session.
 
-They are separate because the dependency-free property above is load-bearing:
-those tools need numpy and scipy for FFT, filtering and heterodyne detection,
-and folding them in here would end the ability to scp this package onto a
-busybox router mid-session. The split is that constraint, not a preference —
-`reac-tools` is an importable, versioned, stdlib-only package; `reac-analysis`
-is a set of flat, experiment-shaped instruments that each take a capture and
-print a measurement. Neither repository is the whole picture.
+## Install
 
-## What problem this solves
+```sh
+git clone https://github.com/FreeREAC/reac-tools
+cd reac-tools
+```
 
-Symptom: console (M-300) recognises both stageboxes, output is patched, but the
-audio is **clicking instead of sound** and both boxes' REAC LEDs burst/solid/burst
-(repeated clock-lock loss). Two hypotheses to test from packet captures:
-
-1. **Datagram loss** in transit across the Wi-Fi/gretap link.
-2. **A/B cross-mixing** — REAC A and B both broadcast the same EtherType to
-   `ff:ff:ff:ff:ff:ff`; only the bridge VLAN tag (11 vs 12) separates them. Any
-   isolation leak makes a box decode the other stream → clicking.
-
-The single-point snapshots we had were too small/wrong-shaped to decide. This
-toolkit does the proper **dual-point** analysis.
-
-## REAC framing facts (verified on the rig 2026-05-30)
-
-- EtherType `0x8819`. Playback (console→box) is **broadcast**, ~1492–1496 B;
-  return (box→console) is smaller unicast.
-- A clean frame is `52 + width × 36` bytes. Two extra bytes after the `C2 EA`
-  end marker (1494, 1206, 630, …) are **not** a REAC field: they are the low 16
-  bits of the frame's own Ethernet FCS, left behind by a capture rig mirroring
-  both RX and TX of a port. Such a capture carries **every frame twice**, one
-  copy with the residue and one without, so half its inter-arrivals are
-  near-zero and the median reads a rate that was never on the wire. Every tool
-  here drops the twin before it measures anything (`clean_payload_len`,
-  `dedupe_mirror_twins`).
-- The frame rate **is** the sample rate: a frame carries 12 time-samples per
-  channel slot at every rate, so `pps = rate / 12` — 3675 pps at 44.1 kHz, 4000
-  at 48 kHz, 8000 at 96 kHz. The table is derived, not typed, in `reac.model`
-  (`RATE_PPS` / `pps_for_rate`); everything else in the toolkit reads it from
-  there. `rate_from_pps` snaps a measured pps to the nearest of the three and
-  returns `None` when none is within 10 %.
-
-  The 2026-05-30 rig session measured **~3000 fps**, which is not any REAC rate.
-  That reading was taken while both boxes were losing clock lock, i.e. it is a
-  symptom, not a framing fact — the rig was running below nominal. It is recorded
-  here because it is what the capture showed, and it is why nothing in the
-  toolkit snaps an off-nominal stream to a rate: 3000 pps is nearest to 3675,
-  and calling it 44.1 kHz would launder the fault into a framing figure.
-- The channel count is **40 slots at every rate**. 96 kHz doubles the packet
-  rate and keeps all 40 (`REAC_MODE_96K` in libreac); the old "96 kHz halves the
-  channels to 20 and doubles the samples per frame" hypothesis is disproved.
-  An active-channel count is a count of slots carrying signal, not a rate clue.
-- The **16-bit sequence counter** is the **first 2 bytes of the payload,
-  little-endian**, increments +1/frame, wraps at `0xffff`. (`0xfd7e→7f→80→81`.)
-- 24-bit PCM payload: digital silence ≈ >90 % zero bytes / few distinct values;
-  real audio = high byte variance.
-- tcpdump on a `vlan_filtering` bridge shows a **phantom 802.1Q tag** on egress
-  (skb metadata before HW strip) — the wire is actually untagged. Check raw hex
-  byte 12–13: `8819` = untagged, `8100…8819` = really tagged.
-- busybox tcpdump on OpenWrt 25.12 has **no standalone `timeout`** — background
-  the capture and `kill` it.
+No build step and no dependencies beyond Python 3's standard library.
 
 ## Modules
 
@@ -86,101 +35,123 @@ toolkit does the proper **dual-point** analysis.
 | `reac.pcap` | classic libpcap `.pcap` reader/writer (no pcapng), link-type 1 |
 | `reac.analyzer` | per-stream loss / reorder / duplicate, cross-mix, jitter, mirror-twin dedup |
 | `reac.characterize` | pcap → rate fingerprint, frame-size histogram, seq health, per-channel peak / active-channel count |
-| `reac.diff` | **dual-point** loss diff: sender-side vs receiver-side captures |
+| `reac.diff` | dual-point loss diff: sender-side vs receiver-side captures |
 | `reac.simulator` | synthetic streams with injectable faults (drives the test suite) |
 | `reac.cli` | analyze one capture file (`--rate` / `--fps` set the jitter nominal) |
 
-`reac.cli` and `reac.diff` read **tcpdump text**; `reac.characterize` reads a
-**`.pcap`** directly. Three modules are runnable as `python3 -m`: `reac.cli`,
+`reac.cli` and `reac.diff` read tcpdump text; `reac.characterize` reads a
+`.pcap` directly. Three modules are runnable as `python3 -m`: `reac.cli`,
 `reac.diff`, `reac.characterize`.
 
-There is also a Wireshark dissector for interactive work — `wireshark/reac.lua`,
-see [`wireshark/README.md`](wireshark/README.md).
+There is also a Wireshark dissector for interactive work —
+[`wireshark/reac.lua`](wireshark/README.md).
 
-## Usage
+## Run
 
-Two capture scripts, both run **on** an OpenWrt router:
+Two capture scripts, run **on** an OpenWrt router (or any host on the REAC
+segment):
 
-- `capture-dualpoint.sh [SECONDS] [IFACE]` — tcpdump *text* at both ends of the
+- `capture-dualpoint.sh [SECONDS] [IFACE]` — tcpdump *text* at both ends of a
   link at once, for the `reac.diff` loss comparison.
-- `capture-campaign.sh <iface> <seconds> <out.pcap> [label]` — full frames to a
-  classic `.pcap`, for `reac.characterize`. Used for the rate campaign (set the
-  console rate before each run; the header of the script carries the sequence).
+- `capture-campaign.sh <iface> <seconds> <out.pcap> [label]` — full frames to
+  a classic `.pcap`, for `reac.characterize`.
 
 ```sh
-# On-site: capture the same stream at both ends simultaneously
-./capture-dualpoint.sh 15 lan1        # 15s on lan1 (REAC A) at r1 + r2
+# capture the same stream at both ends of a link simultaneously
+./capture-dualpoint.sh 15 lan1        # 15 s on lan1 (REAC A) at both ends
 
-# Analyze each capture point (the nominal frame rate is inferred per stream)
+# analyze one capture point (the nominal frame rate is inferred per stream)
 python3 -m reac.cli capture-*/console-r1-lan1.txt
-python3 -m reac.cli capture-*/box-r2-lan1.txt
 
-# ...or state the console's rate, when the stream is too degraded to infer from
+# or state the rate explicitly, when the stream is too degraded to infer from
 # (exit 3 = at least one stream's rate could not be resolved)
 python3 -m reac.cli capture-*/box-r2-lan1.txt --rate 48000
 
-# THE decisive test: what got lost crossing the link?
+# what got lost crossing a link, between a sender-side and receiver-side capture
 python3 -m reac.diff capture-*/console-r1-lan1.txt capture-*/box-r2-lan1.txt
 
-# Rate + channel fingerprint of a .pcap (this one takes pcap, not text)
+# rate + channel fingerprint of a .pcap (this one takes pcap, not text)
 python3 -m reac.characterize /tmp/96k.pcap
 
-# Cross-mix check on box1's port (should only carry VLAN 11 from console A)
+# cross-mix check on a box's port (should only carry one VLAN from one console)
 python3 -m reac.cli capture-*/box-r2-lan1.txt \
     --expect-vlan 11 --expect-src 00:40:ab:c9:91:9c
 ```
 
-## Dual-point capture plan (next on-site session)
+## REAC facts these tools depend on
 
-1. Get on the `192.168.10.x` rig LAN (wired into a router LAN4/5 is best for
-   high-rate capture; don't capture over the WDS you're testing).
-2. `./capture-dualpoint.sh 15 lan1` then again for `lan2` (REAC B).
-3. `reac.diff` console-vs-box → exact lost-in-transit seq count + rate.
-4. `reac.cli --expect-*` on each box port → cross-mix leak.
-5. Jitter ratio in `reac.cli` → bursts that break clock lock.
-6. Correlate with the both-boxes-flashing LED.
+- A clean frame is `52 + width × 36` bytes. Playback (console→box) is
+  broadcast; return (box→console) is smaller unicast. Two extra bytes after
+  the `C2 EA` end marker (1494, 1206, 630, …) are not a REAC field — they are
+  the low 16 bits of the frame's own Ethernet FCS, left behind by a capture
+  rig mirroring both RX and TX of a port. Such a capture carries every frame
+  twice, so half its inter-arrivals read near-zero and a naive median reads a
+  rate that was never on the wire; every tool here drops the twin before
+  measuring anything (`clean_payload_len`, `dedupe_mirror_twins`).
+- The frame rate is the sample rate: a frame carries 12 time-samples per
+  channel slot at every rate, so `pps = rate / 12` — 3675 pps at 44.1 kHz,
+  4000 at 48 kHz, 8000 at 96 kHz (`reac.model.RATE_PPS` / `pps_for_rate`).
+  `rate_from_pps` snaps a measured pps to the nearest of the three and returns
+  `None` when none is within 10%. No tool here assumes a rate from the frame
+  itself — each reads it off the capture.
+- The channel count is 40 slots at every rate. 96 kHz doubles the packet rate
+  and keeps all 40 slots; an active-channel count is a count of slots
+  carrying signal, not a rate clue.
+- The 16-bit sequence counter is the first 2 bytes of the payload,
+  little-endian, +1 per frame, wraps at `0xffff`.
+- 24-bit PCM payload: digital silence is >90% zero bytes / few distinct
+  values; real audio has high byte variance.
+- tcpdump on a `vlan_filtering` bridge can show a phantom 802.1Q tag on
+  egress (skb metadata before hardware strip) when the wire is actually
+  untagged — check raw hex bytes 12–13: `8819` is untagged, `8100…8819` is
+  really tagged.
+- busybox tcpdump on OpenWrt has no standalone `timeout` — background the
+  capture and `kill` it.
 
 ## Tests
 
 ```sh
-python3 -m unittest discover tests -v
+make test               # or: python3 -m unittest discover tests -v
 ```
 
-The suite is **round-trip**: `reac.simulator` injects a *known* fault (N losses,
-a reorder, a dup, a cross-mix, a jitter burst) and asserts the analyzer reports
-exactly it — so the analyzer is trustworthy before it ever sees real captures.
+The suite is round-trip: `reac.simulator` injects a known fault (N losses, a
+reorder, a dup, a cross-mix, a jitter burst) and asserts the analyzer reports
+exactly it, so the analyzer is trustworthy before it ever sees a real capture.
+
+## API reference
+
+The public API carries docstrings; generate browsable HTML with `make docs`
+(needs [pdoc](https://pdoc.dev), output in `site/`). CI publishes it to GitHub
+Pages on each `v*` tag.
 
 ## Related
 
 - [`FreeREAC/reac-analysis`](https://github.com/FreeREAC/reac-analysis) — the
   numpy/scipy half of this toolkit: pitch and clock-wobble meters, spectrum
-  classification, per-channel decode health, glitch and PLC detection, plus the
-  rig measurement scripts.
+  classification, per-channel decode health, glitch and PLC detection.
 - [norihiro/obs-h8819-source](https://github.com/norihiro/obs-h8819-source) —
   OBS REAC plugin; reference for 0x8819 framing (`src/source.c`,
   `src/capdev-proc.c`).
-- `FreeREAC/reac-docs` — build notes for the REAC-over-Wi-Fi rig.
 
 ### REAC protocol references
 
 - https://github.com/per-gron/reacdriver — the original REAC reverse-engineering
   (macOS driver, master/slave modes). Source of the packet format.
 - https://github.com/norihiro/obs-h8819-source — OBS source plugin; framing taken
-  from reacdriver. Confirms 16-bit LE `l2_counter` + per-frame +1 loss check.
-- https://github.com/norihiro/reaccapture — Linux REAC pcap→WAV decoder (GPL-3.0);
-  has the MASTER_ANNOUNCE/handshake decode and both s24be/s24le justifications.
-- https://obsproject.com/forum/resources/reac-audio-source.1471/ — the OBS plugin
-  resource page.
+  from reacdriver. Confirms the 16-bit LE `l2_counter` + per-frame +1 loss check.
+- https://github.com/norihiro/reaccapture — Linux REAC pcap→WAV decoder
+  (GPL-3.0); has the MASTER_ANNOUNCE/handshake decode and both s24be/s24le
+  justifications.
 
 ## Acknowledgements
 
 reac-tools is original work, but the REAC wire protocol it analyses was made
-intelligible by prior reverse-engineering efforts. The 0x8819 framing,
-the 16-bit little-endian sequence counter and the frame layout it relies on
-were documented by the projects below; reac-tools re-implements those
-documented *facts* in pure Python and copies no upstream code. VLAN handling
-follows IEEE 802.1Q and the capture reader follows the public libpcap classic
-savefile format.
+intelligible by prior reverse-engineering efforts. The 0x8819 framing, the
+16-bit little-endian sequence counter and the frame layout it relies on were
+documented by the projects below; reac-tools re-implements those documented
+facts in pure Python and copies no upstream code. VLAN handling follows IEEE
+802.1Q and the capture reader follows the public libpcap classic savefile
+format.
 
 - [per-gron/reacdriver](https://github.com/per-gron/reacdriver) (GPL-3.0) — the
   original REAC reverse-engineering and the source of the wire-framing facts.
@@ -190,13 +161,7 @@ savefile format.
 - Standards: IEEE 802.1Q (VLAN tagging) and the libpcap classic savefile
   format.
 
-## API reference
-
-The public API carries docstrings; generate browsable HTML with `make docs`
-(needs [pdoc](https://pdoc.dev), output in `site/`). CI publishes it to GitHub
-Pages on each `v*` tag.
-
-## License
+## Licence
 
 GPL-3.0-or-later. Copyright (C) 2026 Pau Aliagas. See [LICENSE](LICENSE) and
 [NOTICE](NOTICE).

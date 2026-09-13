@@ -2,10 +2,10 @@
 
 `reac.lua` — a Wireshark / tshark dissector for Roland **REAC** (audio-over-
 Ethernet, EtherType `0x8819`). Generated from the REAC protocol schema in
-[`reac-aes67` `docs/REAC-PROTOCOL.md`](https://github.com/FreeREAC/reac-aes67)
-§3.1 (reverse-engineered from reacdriver / obs-h8819 / reaccapture). It decodes
-the frame header, the type registry, the `data[32]` control block + checksum, the
-MASTER_ANNOUNCE overlay, the audio region, and the end marker.
+[`FreeREAC/reac-protocol`](https://github.com/FreeREAC/reac-protocol)
+`wire-format.md` (reverse-engineered from reacdriver / obs-h8819 / reaccapture).
+It decodes the frame header, the type registry, the `data[32]` control block +
+checksum, the MASTER_ANNOUNCE overlay, the audio region, and the end marker.
 
 ## Use
 ```sh

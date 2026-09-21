@@ -5,3 +5,4 @@ capture-*/
 !tests/fixtures/*.pcap
 .venv/
 site/
+measure-log.csv

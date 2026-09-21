@@ -13,9 +13,27 @@ from .model import Frame
 
 _GLOBAL = struct.Struct("<IHHiIII")   # magic, vmaj, vmin, tz, sigfigs, snaplen, network
 _PKT = struct.Struct("<IIII")         # ts_sec, ts_usec, incl_len, orig_len
-_MAGIC = 0xA1B2C3D4
+_MAGIC = 0xA1B2C3D4                    # classic usec, little-endian
+_MAGIC_NANO = 0xA1B23C4D               # nanosecond precision, little-endian
 _LINKTYPE_ETHERNET = 1
 _REAC_ETHERTYPE = b"\x88\x19"
+
+
+def _pcap_header(hdr):
+    """Return (pkt_struct, ts_divisor) for a classic pcap global header.
+
+    Handles both microsecond (0xa1b2c3d4) and nanosecond (0xa1b23c4d) precision,
+    little- or big-endian — rig captures from `tcpdump --time-stamp-precision=nano`
+    are nanosecond, which the plain usec path would misread as big-endian.
+    """
+    magic = struct.unpack("<I", hdr[:4])[0]
+    if magic in (_MAGIC, _MAGIC_NANO):
+        endian = "<"
+    else:                                     # byte-swapped => big-endian file
+        endian = ">"
+        magic = struct.unpack(">I", hdr[:4])[0]
+    divisor = 1_000_000_000 if magic == _MAGIC_NANO else 1_000_000
+    return struct.Struct(endian + "IIII"), divisor
 
 
 def write_pcap(path, packets):
@@ -56,14 +74,12 @@ def read_pcap(path):
         hdr = f.read(_GLOBAL.size)
         if len(hdr) < _GLOBAL.size:
             return frames
-        magic = struct.unpack("<I", hdr[:4])[0]
-        endian = "<" if magic == _MAGIC else ">"
-        pkt = struct.Struct(endian + "IIII")
+        pkt, div = _pcap_header(hdr)
         while True:
             ph = f.read(pkt.size)
             if len(ph) < pkt.size:
                 break
-            sec, usec, incl, _orig = pkt.unpack(ph)
+            sec, frac, incl, _orig = pkt.unpack(ph)
             raw = f.read(incl)
             if len(raw) < incl:
                 break
@@ -72,7 +88,7 @@ def read_pcap(path):
                 continue
             seq = int.from_bytes(payload[0:2], "little") if len(payload) >= 2 else 0
             frames.append(Frame(
-                ts=sec + usec / 1_000_000,
+                ts=sec + frac / div,
                 src=_mac(raw[6:12]),
                 vlan=vlan,
                 seq=seq,
@@ -93,14 +109,12 @@ def read_pcap_raw(path):
         hdr = f.read(_GLOBAL.size)
         if len(hdr) < _GLOBAL.size:
             return out
-        magic = struct.unpack("<I", hdr[:4])[0]
-        endian = "<" if magic == _MAGIC else ">"
-        pkt = struct.Struct(endian + "IIII")
+        pkt, div = _pcap_header(hdr)
         while True:
             ph = f.read(pkt.size)
             if len(ph) < pkt.size:
                 break
-            sec, usec, incl, _orig = pkt.unpack(ph)
+            sec, frac, incl, _orig = pkt.unpack(ph)
             raw = f.read(incl)
             if len(raw) < incl:
                 break
@@ -108,5 +122,5 @@ def read_pcap_raw(path):
             if payload is None:
                 continue
             seq = int.from_bytes(payload[0:2], "little") if len(payload) >= 2 else 0
-            out.append((sec + usec / 1_000_000, _mac(raw[6:12]), vlan, seq, payload))
+            out.append((sec + frac / div, _mac(raw[6:12]), vlan, seq, payload))
     return out

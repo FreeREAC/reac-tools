@@ -108,6 +108,28 @@ python3 -m reac.cli capture-*/box-r2-lan1.txt \
 - busybox tcpdump on OpenWrt has no standalone `timeout` — background the
   capture and `kill` it.
 
+## Capture-corpus index
+
+`tools/build_capture_index.py` streams every classic pcap in a directory
+**once**, record-by-record with bounded memory (never materialises a whole
+file), and emits a queryable manifest so an agent can answer *"which capture
+shows X"* without opening a single pcap: per-capture filename, size, on-wire
+duration and frame count; distinct source MACs with per-endpoint frame
+counts; a frame-size histogram; the audio/control split with control
+sub-types; establishment landmarks (first master announce, probe, box frame,
+grant, box heartbeat, first audio); and the sample rate inferred from the
+streaming cadence. Everything it emits is deterministic, computed from the
+bytes — an optional `--summaries FILE.json` merges in a human one-line
+`demonstrates` note per file, kept separate from the measured fields.
+
+```sh
+python3 tools/build_capture_index.py path/to/captures --json index.json --md index.md
+```
+
+The index itself is a derived artifact over the capture corpus (which lives
+in `reac-captures`, not here) and is regenerated on demand rather than
+committed.
+
 ## Tests
 
 ```sh

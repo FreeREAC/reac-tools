@@ -1,0 +1,7 @@
+# Paths the docs-to-ops history rewrite drops from FreeREAC/reac-tools (docs-to-ops plan,
+# RULED 2026-10-01 item 2). Each moves to FreeREAC/freereac-ops under reac-tools/<path> before
+# the rewrite. Each "# base <sha>" line names the commit the paths after it are taken from,
+# byte-identical; their history before the rewrite is kept under the backup/pre-rewrite-2026-10-01
+# tag. Cite one by its bare slug, never by path. tools/history_drop.py reads this list.
+# base 494951a8c15defa74d56c8828c8386d8601a45a2
+docs/integrate-or-drop-2026-09-21.md

@@ -174,11 +174,20 @@ class ThisRepo(unittest.TestCase):
         self.assertEqual(history_drop.list_drops(("HEAD",), ROOT, out, err), 0, err.getvalue())
 
     def test_every_listed_base_carries_its_path(self):
+        """Before the rewrite each base carries its path; after it, base and path are both gone
+        (they live on under the backup tag)."""
         if git(ROOT, "rev-parse", "--is-shallow-repository") == "true":
             self.skipTest("shallow clone: the bases are not fetched")
+        history = history_drop.history_paths(("HEAD",), ROOT)
         for base, p in history_drop.read_drops(ROOT):
             with self.subTest(path=p):
-                git(ROOT, "cat-file", "-e", "%s:%s" % (base, p))
+                present = subprocess.run(["git", "cat-file", "-e", base + "^{commit}"], cwd=ROOT,
+                                         capture_output=True).returncode == 0
+                if present:
+                    git(ROOT, "cat-file", "-e", "%s:%s" % (base, p))
+                else:
+                    self.assertNotIn(p, history, "%s is in the history but its base %s is not"
+                                     % (p, base[:12]))
 
 
 if __name__ == "__main__":

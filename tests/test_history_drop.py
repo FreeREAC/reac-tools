@@ -5,7 +5,9 @@
 
 tools/history_drop.py is run by hand on a fresh clone, so these tests drive it on throwaway
 repositories: an internal file added and later deleted, one brought in by a merge, a rewrite
-that drops them, and an ops checkout that holds (or lacks) the dropped files.
+that drops them, and an ops checkout that holds (or lacks) the dropped files. The name rules
+come from a throwaway rules file with made-up names: the real ones are what the tool keeps out
+of this tree.
 """
 import io
 import os
@@ -22,6 +24,7 @@ import history_drop  # noqa: E402
 ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org",
        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org",
        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+RULES = "# made-up name rules for the tests\ninternal/\ndocs/private/\n\nPRIVATE.md\nTODO.md\n"
 
 
 def git(repo, *args):
@@ -40,6 +43,13 @@ def write(repo, path, text):
         f.write(text)
 
 
+def rules_checkout(tmp):
+    """An ops checkout under <tmp> that carries only the test rules; returns its path."""
+    ops = os.path.join(tmp, "rules-ops")
+    write(ops, history_drop.RULES, RULES)
+    return ops
+
+
 class HistoryRepo(unittest.TestCase):
     """main: README, a dated note added then deleted, a merge that brings in a plan."""
 
@@ -56,7 +66,7 @@ class HistoryRepo(unittest.TestCase):
         git(self.repo, "rm", "-q", "docs/session-2026-09-21.md")
         git(self.repo, "commit", "-q", "-m", "drop the note from the tip")
         git(self.repo, "checkout", "-q", "-b", "side")
-        write(self.repo, "docs/plans/next-plan.md", "what next\n")
+        write(self.repo, "docs/next-plan.md", "what next\n")
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "a plan")
         self.plan_base = git(self.repo, "rev-parse", "HEAD")
@@ -66,8 +76,11 @@ class HistoryRepo(unittest.TestCase):
         git(self.repo, "commit", "-q", "-m", "code")
         git(self.repo, "merge", "-q", "--no-ff", "-m", "merge side", "side")
         git(self.repo, "branch", "-q", "-D", "side")
+        self.env = mock.patch.dict(os.environ, {"FREEREAC_OPS": rules_checkout(self.tmp.name)})
+        self.env.start()
 
     def tearDown(self):
+        self.env.stop()
         self.tmp.cleanup()
 
     def drops(self, *groups):
@@ -76,7 +89,7 @@ class HistoryRepo(unittest.TestCase):
 
     def full_list(self):
         self.drops((self.note_base, ["docs/session-2026-09-21.md"]),
-                   (self.plan_base, ["docs/plans/next-plan.md"]))
+                   (self.plan_base, ["docs/next-plan.md"]))
 
     def run_list(self):
         out, err = io.StringIO(), io.StringIO()
@@ -84,8 +97,8 @@ class HistoryRepo(unittest.TestCase):
         return n, out.getvalue().split(), err.getvalue()
 
     def run_check(self):
-        out = io.StringIO()
-        return history_drop.check(("HEAD",), self.repo, out), out.getvalue()
+        out, err = io.StringIO(), io.StringIO()
+        return history_drop.check(("HEAD",), self.repo, out, err), out.getvalue()
 
     def rewrite(self):
         """What filter-repo --invert-paths does to these paths, with git alone."""
@@ -103,14 +116,14 @@ class HistoryRepo(unittest.TestCase):
         self.full_list()
         n, paths, err = self.run_list()
         self.assertEqual(n, 0, err)
-        self.assertEqual(paths, ["docs/plans/next-plan.md", "docs/session-2026-09-21.md"])
+        self.assertEqual(paths, ["docs/next-plan.md", "docs/session-2026-09-21.md"])
 
     def test_list_refuses_an_internal_file_the_list_lacks(self):
         self.drops((self.note_base, ["docs/session-2026-09-21.md"]))
         n, paths, err = self.run_list()
         self.assertEqual(n, 1)
-        self.assertIn("UNLISTED docs/plans/next-plan.md", err)
-        self.assertIn("docs/plans/next-plan.md", paths)
+        self.assertIn("UNLISTED docs/next-plan.md", err)
+        self.assertIn("docs/next-plan.md", paths)
 
     def test_check_fails_before_the_rewrite_and_passes_after(self):
         self.full_list()
@@ -137,15 +150,15 @@ class HistoryRepo(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"FREEREAC_OPS": ""}):  # the sibling rung
             self.assertEqual(history_drop.ops_confirm(self.repo, out), 1)
-        self.assertIn("OPS-MISSING docs/plans/next-plan.md", out.getvalue())
+        self.assertIn("OPS-MISSING docs/next-plan.md", out.getvalue())
 
-        write(ops, "reac-tools/docs/plans/next-plan.md", "what next, edited\n")
+        write(ops, "reac-tools/docs/next-plan.md", "what next, edited\n")
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"FREEREAC_OPS": ops}):
             self.assertEqual(history_drop.ops_confirm(self.repo, out), 1)
-        self.assertIn("OPS-DIFFERS docs/plans/next-plan.md", out.getvalue())
+        self.assertIn("OPS-DIFFERS docs/next-plan.md", out.getvalue())
 
-        write(ops, "reac-tools/docs/plans/next-plan.md", "what next\n")
+        write(ops, "reac-tools/docs/next-plan.md", "what next\n")
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"FREEREAC_OPS": ops}):
             self.assertEqual(history_drop.ops_confirm(self.repo, out), 0)
@@ -153,18 +166,39 @@ class HistoryRepo(unittest.TestCase):
 
 
 class Classes(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.rules = history_drop.read_rules(rules_checkout(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_rules_file(self):
+        self.assertEqual(self.rules, (("internal/", "docs/private/"), ("PRIVATE.md", "TODO.md")))
+        self.assertEqual(history_drop.read_rules(None), ((), ()))
+        with self.assertRaises(SystemExit):  # a checkout without the file is not an empty rule set
+            history_drop.read_rules(self.tmp.name)
+
     def test_internal(self):
-        for p in ("docs/integrate-or-drop-2026-09-21.md", "docs/audits/x.md", "ROADMAP.md",
-                  "docs/plans/a.md", "rollout-plan.md", "defect-census-2026-08-23.md",
-                  ".claude/skills/x/SKILL.md", "firmware-findings.md", "spec/scene-8904.bin"):
+        for p in ("docs/integrate-or-drop-2026-09-21.md", "internal/x.md", "PRIVATE.md",
+                  "docs/private/a.md", "docs/TODO.md", "rollout-plan.md",
+                  "defect-census-2026-08-23.md", "internal/skills/x/SKILL.md",
+                  "firmware-findings.md", "spec/scene-8904.bin"):
             with self.subTest(path=p):
-                self.assertTrue(history_drop.belongs_in_ops(p))
+                self.assertTrue(history_drop.belongs_in_ops(p, self.rules))
 
     def test_public(self):
         for p in ("README.md", "wireshark/README.md", "reac/cli.py", "LICENSE",
-                  "tests/fixtures/real_reac_stream.pcap", "tools/real_capture_payloads.json"):
+                  "tests/fixtures/real_reac_stream.pcap", "tools/real_capture_payloads.json",
+                  "internals.md", "docs/privateer.md"):
             with self.subTest(path=p):
-                self.assertFalse(history_drop.belongs_in_ops(p))
+                self.assertFalse(history_drop.belongs_in_ops(p, self.rules))
+
+    def test_without_rules_only_the_patterns_classify(self):
+        self.assertFalse(history_drop.belongs_in_ops("internal/x.md", ((), ())))
+        self.assertTrue(history_drop.belongs_in_ops("internal/x-plan.md", ((), ())))
+        with mock.patch.dict(os.environ, {"FREEREAC_OPS": rules_checkout(self.tmp.name)}):
+            self.assertTrue(history_drop.belongs_in_ops("internal/x.md"))  # None reads the checkout
 
 
 class ThisRepo(unittest.TestCase):

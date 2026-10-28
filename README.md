@@ -17,14 +17,22 @@ classification, per-channel decode health and glitch/PLC detection live in
 needs numpy and scipy. Keeping those out is what lets this package be scp'd
 onto a busybox router mid-session.
 
-## Install
+## Source only
+
+There is no package: reac-tools is run from a checkout, and this is deliberate.
+The standard-library-only rule exists so that the `reac/` directory can be
+copied with `scp` onto a busybox router mid-session and run there as it is; a
+package would put an install step on exactly the host that has no package
+manager for it. Nothing is compiled.
 
 ```sh
 git clone https://github.com/FreeREAC/reac-tools
 cd reac-tools
+python3 -m reac.cli <capture.txt>
 ```
 
-No build step and no dependencies beyond Python 3's standard library.
+Developer steps — running the tests, generating the API reference — are in
+[BUILDING.md](BUILDING.md).
 
 ## Modules
 
@@ -130,21 +138,13 @@ The index itself is a derived artifact over the capture corpus (which lives
 in `reac-captures`, not here) and is regenerated on demand rather than
 committed.
 
-## Tests
-
-```sh
-make test               # or: python3 -m unittest discover tests -v
-```
+## Tests and API reference
 
 The suite is round-trip: `reac.simulator` injects a known fault (N losses, a
 reorder, a dup, a cross-mix, a jitter burst) and asserts the analyzer reports
 exactly it, so the analyzer is trustworthy before it ever sees a real capture.
-
-## API reference
-
-The public API carries docstrings; generate browsable HTML with `make docs`
-(needs [pdoc](https://pdoc.dev), output in `site/`). CI publishes it to GitHub
-Pages on each `v*` tag.
+The public API carries docstrings, published as HTML to GitHub Pages on each
+`v*` tag. How to run either is in [BUILDING.md](BUILDING.md).
 
 ## Related
 

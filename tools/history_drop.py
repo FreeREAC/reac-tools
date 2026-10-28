@@ -22,6 +22,14 @@ without its extension), never by path.
 The ops checkout is found by one rule: $FREEREAC_OPS, else the sibling ../freereac-ops, else
 absent. Absent, ops-confirm prints OPS-ABSENT and fails: nothing is dropped unconfirmed.
 
+What counts as internal is two kinds of rule. The pattern rules are in this file: a dated note, a
+plan, an audit or census ledger, a firmware note, a vendor binary. The name rules -- the internal
+directories and file names themselves -- are the thing the sweep keeps out of public trees, so
+they are not spelled here: they live once, in the ops checkout, as history-internal.txt at its
+root, shared by every repository's copy of this tool. A line ending in "/" is a path prefix, any
+other non-comment line a bare file name. Without the checkout only the drop list and the pattern
+rules classify, and list/check say so (RULES-ABSENT) on stderr.
+
 The rewrite, run by hand in a FRESH clone once the move has landed on main (never on a lane
 checkout, never force-pushed by a lane):
 
@@ -40,23 +48,40 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DROPS = "tools/history-drop.txt"
 OPS_SUBDIR = "reac-tools"
+RULES = "history-internal.txt"  # at the root of the ops checkout: the name rules
 
-INTERNAL_DIRS = ("docs/audits/", "docs/notes/", "docs/plans/", "docs/design/", "notes/",
-                 "plans/", ".claude/")
-INTERNAL_NAMES = ("ROADMAP.md", "CLAUDE.md", "AGENTS.md")
 PLAN = re.compile(r"-plan(-[^/]*)?\.md$")
 LEDGER = re.compile(r"(^|-)(audit|census)(-[^/]*)?\.md$")
 DATED = re.compile(r"\d{4}-\d{2}-\d{2}[^/]*\.md$")  # a dated note is a session record, not a doc
 
 
-def belongs_in_ops(path):
-    """True when <path> is internal material or vendor RE: it lives in freereac-ops."""
+def read_rules(root):
+    """(path prefixes, file names) from <root>/history-internal.txt; both empty when the ops
+    checkout is absent. A checkout without the file is an error, not an empty rule set."""
+    if root is None:
+        return (), ()
+    path = os.path.join(root, RULES)
+    if not os.path.isfile(path):
+        raise SystemExit("%s: the ops checkout carries no %s" % (root, RULES))
+    prefixes, names = [], []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                (prefixes if line.endswith("/") else names).append(line)
+    return tuple(prefixes), tuple(names)
+
+
+def belongs_in_ops(path, rules=None):
+    """True when <path> is internal material or vendor RE: it lives in freereac-ops. <rules> is
+    read_rules()'s pair; None reads it from the ops checkout."""
+    prefixes, names = read_rules(ops_root()) if rules is None else rules
     base = path.rsplit("/", 1)[-1]
     if base.startswith("firmware-") and base.endswith(".md"):
         return True
     if base.endswith(".bin"):
         return True  # a vendor binary
-    return (path.startswith(INTERNAL_DIRS) or base in INTERNAL_NAMES
+    return (path.startswith(prefixes) or base in names
             or bool(PLAN.search(base) or LEDGER.search(base) or DATED.search(base)))
 
 
@@ -103,17 +128,22 @@ def history_paths(revs, repo=REPO):
     return seen
 
 
-def history_internal(revs, repo=REPO):
+def history_internal(revs, repo=REPO, err=sys.stderr):
     """{internal path: the commit it entered by} in the history of <revs>: every listed path
-    and every path the rule classes as internal."""
+    and every path the rules class as internal."""
     listed = {p for _, p in read_drops(repo)}
+    root = ops_root(repo)
+    if root is None:
+        print("RULES-ABSENT: no $FREEREAC_OPS and no ../freereac-ops, so no name rules; only %s "
+              "and the pattern rules classify" % DROPS, file=err)
+    rules = read_rules(root)
     return {p: c for p, c in history_paths(revs, repo).items()
-            if p in listed or belongs_in_ops(p)}
+            if p in listed or belongs_in_ops(p, rules)}
 
 
 def list_drops(revs=("--all",), repo=REPO, out=sys.stdout, err=sys.stderr):
     """Print the rewrite's drop list; returns the count of internal paths the list lacks."""
-    found = history_internal(revs, repo)
+    found = history_internal(revs, repo, err)
     listed = {p for _, p in read_drops(repo)}
     unlisted = sorted(p for p in found if p not in listed)
     for p in unlisted:
@@ -158,9 +188,9 @@ def ops_confirm(repo=REPO, out=sys.stdout):
     return fails
 
 
-def check(revs=("HEAD",), repo=REPO, out=sys.stdout):
+def check(revs=("HEAD",), repo=REPO, out=sys.stdout, err=sys.stderr):
     """One HISTORY-INTERNAL line per internal path still in the history; returns the count."""
-    found = history_internal(revs, repo)
+    found = history_internal(revs, repo, err)
     for p in sorted(found):
         print("HISTORY-INTERNAL %s: added in %s; the public history must not carry it (%s)"
               % (p, found[p][:12], DROPS), file=out)

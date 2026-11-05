@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 """Counterexample hunt for the TAG-0500 identity-handshake model.
 
 The model under test, from the M-200 enrol and establish decodes:

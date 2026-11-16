@@ -70,6 +70,12 @@ class TestNoDependencies(unittest.TestCase):
                     f"runs on a busybox router; put this in reac-labtools instead.",
                 )
 
+    def test_stdlib_set_is_the_interpreters_own(self):
+        """No hand-kept module list: the interpreter's own set is the only one."""
+        source = pathlib.Path(__file__).read_text(encoding="utf-8")
+        self.assertNotIn("frozen" + "set({", source)
+        self.assertNotIn("get" + "attr(", source)
+
     def test_numpy_and_scipy_are_absent_from_the_tree(self):
         """A grep-level backstop: neither name should appear in any source file."""
         root = PKG.parent

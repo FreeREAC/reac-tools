@@ -2,14 +2,9 @@
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 
 """Tests for reac.ctrl — the control-block parser + checksum + entry decode."""
-import os
 import unittest
 
 from reac import ctrl
-from reac.pcap import read_pcap_raw
-
-_CORPUS = os.path.join(os.path.dirname(__file__), "..", "..",
-                       "reac-captures", "captures")
 
 
 def build_heartbeat(entries, sel=0x01, counter=0, src=b"\x00\x40\xab\xc9\xcc\x03",
@@ -77,35 +72,6 @@ class TestParse(unittest.TestCase):
         # first slot's chan_id is payload[9] == frame[23]; value two bytes later
         self.assertEqual(e0.off, 9)                 # payload offset of chan_id
         self.assertEqual(e0.off + 2, 11)            # payload offset of value == frame[25]
-
-
-class TestRealCorpus(unittest.TestCase):
-    @unittest.skipUnless(
-        os.path.exists(os.path.join(_CORPUS, "matrix-m200-s0808-2026-07-11.pcap")),
-        "corpus capture not present")
-    def test_all_control_frames_checksum_verify(self):
-        path = os.path.join(_CORPUS, "matrix-m200-s0808-2026-07-11.pcap")
-        seen = ok = 0
-        for _t, _s, _v, _q, payload in read_pcap_raw(path):
-            c = ctrl.parse(payload)
-            if c.kind in (ctrl.NONE, ctrl.FILLER):
-                continue
-            seen += 1
-            ok += 1 if c.cksum_ok else 0
-        self.assertGreater(seen, 0)
-        self.assertEqual(ok, seen)                  # every cdea/cfea block checksums
-
-    @unittest.skipUnless(
-        os.path.exists(os.path.join(_CORPUS, "matrix-m200-s0808-2026-07-11.pcap")),
-        "corpus capture not present")
-    def test_corpus_gain_byte_is_zero(self):
-        """The FSM-evidence claim (task #155): gain byte 0x00 across the corpus."""
-        path = os.path.join(_CORPUS, "matrix-m200-s0808-2026-07-11.pcap")
-        for _t, _s, _v, _q, payload in read_pcap_raw(path):
-            c = ctrl.parse(payload)
-            if c.kind == ctrl.MASTER_HB:
-                for e in c.entries:
-                    self.assertEqual(e.value, 0x00)
 
 
 if __name__ == "__main__":

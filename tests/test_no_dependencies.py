@@ -18,19 +18,8 @@ import unittest
 
 PKG = pathlib.Path(__file__).resolve().parent.parent / "reac"
 
-# Anything the interpreter ships. sys.stdlib_module_names is 3.10+; the tuple
-# below covers what this package actually uses on older interpreters.
-STDLIB = getattr(
-    sys,
-    "stdlib_module_names",
-    frozenset(
-        {
-            "argparse", "binascii", "collections", "contextlib", "dataclasses",
-            "io", "json", "os", "re", "statistics", "struct", "sys", "tempfile",
-            "unittest",
-        }
-    ),
-)
+# Anything the interpreter ships.
+STDLIB = sys.stdlib_module_names
 
 LOCAL = {"reac"}
 

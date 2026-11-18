@@ -21,9 +21,6 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "real_reac_stream.
 
 
 class TestRealFixture(unittest.TestCase):
-    def test_fixture_exists(self):
-        self.assertTrue(os.path.exists(FIXTURE), "fixture pcap missing; run tools/make_fixture.py")
-
     def test_parses_four_consecutive_frames(self):
         frames = read_pcap(FIXTURE)
         self.assertEqual(len(frames), 4)

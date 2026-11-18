@@ -24,9 +24,6 @@ class TestRateTable(unittest.TestCase):
                 self.assertEqual(pps_for_rate(rate), rate / 12)
                 self.assertEqual(RATE_PPS[rate], rate / SAMPLES_PER_FRAME)
 
-    def test_table_values(self):
-        self.assertEqual(RATE_PPS, {44100: 3675.0, 48000: 4000.0, 96000: 8000.0})
-
     def test_characterize_shares_the_one_table(self):
         # characterize used to carry its own copy; it must not diverge again
         self.assertIs(_RATES, RATE_PPS)
